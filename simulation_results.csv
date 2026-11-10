@@ -1,0 +1,4 @@
+Random_Seed,Ws,Wr,Packet_Error_Prob,ACK_Error_Prob,Timeout,Delivered_Packets,Total_Time_ms,Link_Efficiency,Avg_TX_Attempts
+400381927,1,1,0.00,0.00,15.0,5,55.00,0.09091,1.00000
+400460990,1,1,0.00,0.00,15.0,5,55.00,0.09091,1.00000
+400434859,1,1,0.00,0.00,15.0,5,55.00,0.09091,1.00000

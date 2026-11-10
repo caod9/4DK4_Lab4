@@ -1,26 +1,3 @@
-
-/*
- * Simulation_Run of the ALOHA Protocol
- * 
- * Copyright (C) 2014 Terence D. Todd Hamilton, Ontario, CANADA
- * todd@mcmaster.ca
- * 
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 3 of the License, or (at your option)
- * any later version.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- * 
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
- * 
- */
-
-/*******************************************************************************/
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -29,6 +6,7 @@
 #include "simparameters.h"
 #include "cleanup.h"
 #include "packet_transmission.h"
+#include "csv_logger.h"
 #include "main.h"
 
 int
@@ -40,8 +18,10 @@ main(void)
   Simulation_Run_Ptr simulation_run;
   Simulation_Run_Data data;
   long int i, max_seq_alloc;
+  double sim_time, efficiency, avg_tx_attempts;
   int j = 0;
 
+  /* Do a new simulation run for each random number generator seed. */
   while ((random_seed = RANDOM_SEEDS[j++]) != 0) {
 
     random_generator_initialize(random_seed);
@@ -68,7 +48,7 @@ main(void)
     data.number_of_packets_processed = 0;
     data.retx_queue = fifoqueue_new();
 
-    /* Allocate tracking arrays with headroom for window beyond RUNLENGTH */
+    /* Allocate tracking arrays */
     max_seq_alloc = data.max_packets + data.Ws + 1000;
     data.acked = (int *) xcalloc((unsigned) max_seq_alloc, sizeof(int));
     data.in_retx_queue = (int *) xcalloc((unsigned) max_seq_alloc, sizeof(int));
@@ -82,24 +62,35 @@ main(void)
     /* Start transmitting at t = 0.0 */
     try_send_next_packet(simulation_run);
 
-    /* Run discrete-event simulation until max_packets are delivered & ACKed */
+    /* Execute events until we finish the run length */
     while (data.number_of_packets_processed < data.max_packets) {
       simulation_run_execute_event(simulation_run);
     }
 
+    /* Print out console results */
     output_results(simulation_run);
+
+    /* =========================================================================
+     * GENERIC CSV EXPORT LOG CALL
+     * Easily customizable or repeatable for any future parts / experiments!
+     * ========================================================================= */
+    sim_time = simulation_run_get_time(simulation_run);
+    efficiency = (data.number_of_packets_processed * MEAN_PACKET_DURATION) / sim_time;
+    avg_tx_attempts = (double) data.total_tx_attempts / data.number_of_packets_processed;
+
+    log_row_to_csv(
+      "simulation_results.csv",                                   /* Filename */
+      "Random_Seed,Ws,Wr,Packet_Error_Prob,ACK_Error_Prob,Timeout,Delivered_Packets,Total_Time_ms,Link_Efficiency,Avg_TX_Attempts", /* Headers */
+      "%u,%d,%d,%.2f,%.2f,%.1f,%ld,%.2f,%.5f,%.5f",               /* Format string */
+      data.random_seed, data.Ws, data.Wr, data.pd, data.pa, 
+      data.timeout_interval, data.number_of_packets_processed, 
+      sim_time, efficiency, avg_tx_attempts
+    );
+
+    /* Clean up memory for this seed run. */
     cleanup(simulation_run);
   }
 
+  printf("\n[SUCCESS] Results successfully appended to 'simulation_results.csv'!\n");
   return 0;
 }
-
-
-
-
-
-
-
-
-
-
