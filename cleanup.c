@@ -27,30 +27,22 @@
 #include "simparameters.h"
 #include "cleanup.h"
 
-/*******************************************************************************/
-
 void
-cleanup (Simulation_Run_Ptr simulation_run)
+cleanup(Simulation_Run_Ptr simulation_run)
 {
   Simulation_Run_Data_Ptr data;
-  int i;
 
   data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
 
-  /* Clean out the stations. */
-  for(i=0; i<NUMBER_OF_STATIONS; i++) {
-    while (fifoqueue_size((data->stations+i)->buffer) > 0) {
-      xfree(fifoqueue_get((data->stations+i)->buffer));
-    }
+  while (fifoqueue_size(data->retx_queue) > 0) {
+    xfree(fifoqueue_get(data->retx_queue));
   }
-  xfree(data->stations);
+  xfree(data->retx_queue);
 
-  /* Clean out the channel. */
-  xfree(data->channel);
+  xfree(data->acked);
+  xfree(data->in_retx_queue);
+  xfree(data->timer_event_id);
+  xfree(data->recv_buf);
 
-  /* Clean up the simulation_run. */
   simulation_run_free_memory(simulation_run);
 }
-
-
-

@@ -21,31 +21,40 @@
  */
 
 /*******************************************************************************/
+#ifndef _PACKET_TRANSMISSION_H_
+#define _PACKET_TRANSMISSION_H_
 
 #include "main.h"
 
 /*******************************************************************************/
 
-#ifndef _PACKET_TRANSMISSION_H_
-#define _PACKET_TRANSMISSION_H_
-
-/*******************************************************************************/
-
-/*
- * Function prototypes
- */
-
+/* Helper to start transmitting next eligible packet if link is idle */
 void
-transmission_start_event(Simulation_Run_Ptr, void *);
+try_send_next_packet(Simulation_Run_Ptr);
 
+/* 1. End of 1 ms Data Packet Transmission at Source */
 long int
-schedule_transmission_start_event(Simulation_Run_Ptr, Time, void *);
-
+schedule_transmission_end_event(Simulation_Run_Ptr, Time, void *);
 void
 transmission_end_event(Simulation_Run_Ptr, void *);
 
+/* 2. Data Packet Arrival at Destination (after 5 ms prop delay) */
 long int
-schedule_transmission_end_event(Simulation_Run_Ptr, Time, void *);
+schedule_packet_arrival_at_dest_event(Simulation_Run_Ptr, Time, void *);
+void
+packet_arrival_at_dest_event(Simulation_Run_Ptr, void *);
+
+/* 3. ACK Arrival at Source (after 5 ms prop delay) */
+long int
+schedule_ack_arrival_at_src_event(Simulation_Run_Ptr, Time, void *);
+void
+ack_arrival_at_src_event(Simulation_Run_Ptr, void *);
+
+/* 4. Retransmission Timer Expiration at Source (after Tout ms) */
+long int
+schedule_timeout_event(Simulation_Run_Ptr, Time, void *);
+void
+timeout_event(Simulation_Run_Ptr, void *);
 
 /*******************************************************************************/
 

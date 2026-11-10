@@ -27,8 +27,6 @@
 #include "main.h"
 #include "output.h"
 
-/*******************************************************************************/
-
 void
 output_blip_to_screen(Simulation_Run_Ptr simulation_run)
 {
@@ -36,63 +34,38 @@ output_blip_to_screen(Simulation_Run_Ptr simulation_run)
   Simulation_Run_Data_Ptr data;
 
   data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
-
   data->blip_counter++;
 
-  if((data->blip_counter >= BLIPRATE)
-     ||
-     (data->number_of_packets_processed >= RUNLENGTH)) {
-
+  if ((data->blip_counter >= BLIPRATE) ||
+      (data->number_of_packets_processed >= data->max_packets)) {
     data->blip_counter = 0;
-
-    percentagedone =
-      100 * (double) data->number_of_packets_processed/RUNLENGTH;
-
-    printf("%3.0f%% ", percentagedone);
-
-    printf("Successfully Xmtted Pkts  = %ld (Arrived Pkts = %ld) \r", 
-	   data->number_of_packets_processed, 
-	   data->arrival_count);
-
+    percentagedone = 100.0 * (double) data->number_of_packets_processed / data->max_packets;
+    printf("%3.0f%% Successfully Delivered Pkts = %ld (Total Tx Attempts = %ld)\r",
+           percentagedone, data->number_of_packets_processed, data->total_tx_attempts);
     fflush(stdout);
   }
 }
 
-/**********************************************************************/
-
-void output_results(Simulation_Run_Ptr this_simulation_run)
+void
+output_results(Simulation_Run_Ptr this_simulation_run)
 {
-  int i;
-  double xmtted_fraction;
+  double sim_time, efficiency, avg_attempts;
   Simulation_Run_Data_Ptr sim_data;
 
   sim_data = (Simulation_Run_Data_Ptr) simulation_run_data(this_simulation_run);
+  sim_time = simulation_run_get_time(this_simulation_run);
 
-  printf("\n");
-  printf("Random Seed = %d \n", sim_data->random_seed);
-  printf("Pkt Arrivals = %ld \n", sim_data->arrival_count);
+  efficiency = (sim_data->number_of_packets_processed * MEAN_PACKET_DURATION) / sim_time;
+  avg_attempts = (double) sim_data->total_tx_attempts / sim_data->number_of_packets_processed;
 
-  xmtted_fraction = (double) sim_data->number_of_packets_processed /
-    sim_data->arrival_count;
-
-  printf("Xmtted Pkts  = %ld (Service Fraction = %.5f)\n",
-	 sim_data->number_of_packets_processed, xmtted_fraction);
-
-  printf("Mean Delay   = %.1f \n",
-	 sim_data->accumulated_delay/sim_data->number_of_packets_processed);
-
-  printf("Mean collisions per packet = %.3f\n",
-	 (double) sim_data->number_of_collisions / 
-	 sim_data->number_of_packets_processed);
-
-  for(i=0; i<NUMBER_OF_STATIONS; i++) {
-
-    printf("Station %2i Mean Delay = %8.1f \n", i,
-	   (sim_data->stations+i)->accumulated_delay / 
-	   (sim_data->stations+i)->packet_count);
-  }
-  printf("\n\n");
+  printf("\n************************************************************\n");
+  printf("Random Seed               = %u\n", sim_data->random_seed);
+  printf("Protocol Settings         = Ws=%d, Wr=%d, pd=%.2f, pa=%.2f, Tout=%.1f ms\n",
+         sim_data->Ws, sim_data->Wr, sim_data->pd, sim_data->pa, sim_data->timeout_interval);
+  printf("Delivered Packets         = %ld\n", sim_data->number_of_packets_processed);
+  printf("Total Tx Attempts         = %ld\n", sim_data->total_tx_attempts);
+  printf("Total Completion Time     = %.2f ms\n", sim_time);
+  printf("Link Efficiency           = %.5f\n", efficiency);
+  printf("Avg Tx Attempts / Packet  = %.5f\n", avg_attempts);
+  printf("************************************************************\n\n");
 }
-
-
-

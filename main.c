@@ -21,7 +21,6 @@
  */
 
 /*******************************************************************************/
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -29,84 +28,71 @@
 #include "trace.h"
 #include "simparameters.h"
 #include "cleanup.h"
-#include "packet_arrival.h"
 #include "packet_transmission.h"
 #include "main.h"
-
-/*******************************************************************************/
 
 int
 main(void)
 {
-  /* Get the list of random number generator seeds defined in simparameters.h */
   unsigned random_seed;
   unsigned RANDOM_SEEDS[] = {RANDOM_SEED_LIST, 0};
 
   Simulation_Run_Ptr simulation_run;
   Simulation_Run_Data data;
-  int i, j=0;
+  long int i, max_seq_alloc;
+  int j = 0;
 
-  /* Do a new simulation_run for each random number generator seed. */
   while ((random_seed = RANDOM_SEEDS[j++]) != 0) {
 
-    /* Set the random generator seed. */
     random_generator_initialize(random_seed);
-
-    /* Create a new simulation_run. This gives a clock and
-       eventlist. Clock time is set to zero. */
     simulation_run = (Simulation_Run_Ptr) simulation_run_new();
+    simulation_run_set_data(simulation_run, (void *) &data);
 
-    /* Add our data definitions to the simulation_run. */
-    simulation_run_set_data(simulation_run, (void *) & data);
-
-    /* Create and initalize the stations. */
-    data.stations = (Station_Ptr) xcalloc((unsigned int) NUMBER_OF_STATIONS,
-					  sizeof(Station));
-
-    /* Initialize various simulation_run variables. */
-    data.blip_counter = 0;
-    data.arrival_count = 0;
-    data.number_of_packets_processed = 0;
-    data.number_of_collisions = 0;
-    data.accumulated_delay = 0.0;
+    /* Load parameters from simparameters.h */
+    data.Ws = SEND_WINDOW_SIZE;
+    data.Wr = RECV_WINDOW_SIZE;
+    data.pd = PACKET_ERROR_PROB;
+    data.pa = ACK_ERROR_PROB;
+    data.timeout_interval = TIMEOUT_DELAY;
+    data.finite_source = FINITE_SOURCE;
+    data.max_packets = RUNLENGTH;
     data.random_seed = random_seed;
-    
-    /* Initialize the stations. */
-    for(i=0; i<NUMBER_OF_STATIONS; i++) {
-      (data.stations+i)->id = i;
-      (data.stations+i)->buffer = fifoqueue_new();
-      (data.stations+i)->packet_count = 0;
-      (data.stations+i)->accumulated_delay = 0.0;
-      (data.stations+i)->mean_delay = 0;
+
+    /* Initialize Sender & Receiver state */
+    data.S_base = 0;
+    data.next_seq = 0;
+    data.tx_busy = 0;
+    data.R_next = 0;
+    data.blip_counter = 0;
+    data.total_tx_attempts = 0;
+    data.number_of_packets_processed = 0;
+    data.retx_queue = fifoqueue_new();
+
+    /* Allocate tracking arrays with headroom for window beyond RUNLENGTH */
+    max_seq_alloc = data.max_packets + data.Ws + 1000;
+    data.acked = (int *) xcalloc((unsigned) max_seq_alloc, sizeof(int));
+    data.in_retx_queue = (int *) xcalloc((unsigned) max_seq_alloc, sizeof(int));
+    data.timer_event_id = (long int *) xcalloc((unsigned) max_seq_alloc, sizeof(long int));
+    data.recv_buf = (int *) xcalloc((unsigned) max_seq_alloc, sizeof(int));
+
+    for (i = 0; i < max_seq_alloc; i++) {
+      data.timer_event_id[i] = -1;
     }
 
-    /* Create and initialize the channel. */
-    data.channel = channel_new();
+    /* Start transmitting at t = 0.0 */
+    try_send_next_packet(simulation_run);
 
-    /* Schedule initial packet arrival. */
-    schedule_packet_arrival_event(simulation_run, 
-		    simulation_run_get_time(simulation_run) +
-		    exponential_generator((double) 1/PACKET_ARRIVAL_RATE));
-
-    /* Execute events until we are finished. */
-    while(data.number_of_packets_processed < RUNLENGTH) {
+    /* Run discrete-event simulation until max_packets are delivered & ACKed */
+    while (data.number_of_packets_processed < data.max_packets) {
       simulation_run_execute_event(simulation_run);
     }
 
-    /* Print out some results. */
     output_results(simulation_run);
-
-    /* Clean up memory. */
     cleanup(simulation_run);
   }
 
-  /* Pause before finishing. */
-  getchar();
-
   return 0;
 }
-
-
 
 
 

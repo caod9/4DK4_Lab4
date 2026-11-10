@@ -27,22 +27,34 @@
 
 /*******************************************************************************/
 
-#define NUMBER_OF_STATIONS 10
-#define MEAN_PACKET_DURATION 1      /* normalized packet Tx time */
-#define PACKET_ARRIVAL_RATE 0.1     /* packets per Tx time */
-#define MEAN_BACKOFF_DURATION 10    /* in units of packet transmit time, Tx */
-#define RUNLENGTH 70000000
-#define BLIPRATE 100000
+#define MEAN_PACKET_DURATION 1.0    /* 1000 bits / 1 Mbps = 1.0 ms Tx time */
+#define PROP_DELAY           5.0    /* 5.0 ms one-way propagation delay (RTT = 10 ms) */
+#define TIMEOUT_DELAY        15.0   /* Default 15.0 ms timeout */
 
-/* Comma separated list of random seeds to run. */
-#define RANDOM_SEED_LIST 333333, 222222, 44444
+/* ARQ Window Sizes:
+ * S&W: Ws = 1, Wr = 1
+ * GBN: Ws = N, Wr = 1
+ * SR:  Ws = N, Wr = M
+ */
+
+#define SEND_WINDOW_SIZE     1      /* Ws */
+#define RECV_WINDOW_SIZE     1      /* Wr */
+
+/* Channel Error Probabilities */
+#define PACKET_ERROR_PROB    0.0    /* pd (set to 0.0 or 0.5 for Exp 1) */
+#define ACK_ERROR_PROB       0.0    /* pa (set to 0.0 or 0.5 for Exp 1) */
+
+/* Simulation Run Settings */
+#define FINITE_SOURCE        0      /* 0 = continuously backlogged, 1 = finite N packets */
+#define RUNLENGTH            5      /* 5 packets for Exp 1 trace (use 10000 for plots) */
+#define BLIPRATE             1000
+
+/* Comma separated list of random seeds to run (put your Student ID first!) */
+#define RANDOM_SEED_LIST 400381927, 400460990, 400434859
 
 /*******************************************************************************/
 
 #endif /* simparameters.h */
-
-
-
 
 
 

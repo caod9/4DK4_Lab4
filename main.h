@@ -24,7 +24,6 @@
  */
 
 /**********************************************************************/
-
 #ifndef _MAIN_H_
 #define _MAIN_H_
 
@@ -32,7 +31,6 @@
 
 #include "simlib.h"
 #include "simparameters.h"
-#include "channel.h"
 
 /**********************************************************************/
 
@@ -41,46 +39,47 @@ typedef Fifoqueue_Ptr Buffer_Ptr;
 
 /**********************************************************************/
 
-typedef struct _station_
-{
-  int id;
-  Buffer_Ptr buffer;
-  long int packet_count;
-  double accumulated_delay;
-  double mean_delay;
-} Station, * Station_Ptr;
-
-/**********************************************************************/
-
-typedef enum {WAITING, TRANSMITTING} Packet_Status;
-
+/* Passed as the event attachment for Packet, ACK, and Timeout events */
 typedef struct _packet_ 
 {
-  double arrive_time;
-  double service_time;
-  int station_id;
-  Packet_Status status;
-  int collision_count;
+  long int seq_num;       /* Packet sequence number (or ACKed seq_num) */
+  long int rn;            /* Cumulative ACK R_next carried by an ACK */
 } Packet, * Packet_Ptr;
 
 typedef struct _simulation_run_data_
 {
-  Station_Ptr stations;
-  Channel_Ptr channel;
+  /* Protocol & Channel Parameters (allows sweeping in main.c later) */
+  int Ws;
+  int Wr;
+  double pd;
+  double pa;
+  double timeout_interval;
+  int finite_source;
+  long int max_packets;
+
+  /* Sender Sliding Window State */
+  long int S_base;                  /* Oldest unacknowledged sequence number */
+  long int next_seq;                /* Next new sequence number to transmit */
+  int tx_busy;                      /* 1 if sender is currently transmitting */
+  Buffer_Ptr retx_queue;            /* FIFO queue of sequence numbers to retransmit */
+
+  /* Per-packet tracking arrays (dynamically allocated in main.c) */
+  int * acked;                      /* 1 if packet seq_num has been ACKed */
+  int * in_retx_queue;              /* 1 if packet seq_num is waiting in retx_queue */
+  long int * timer_event_id;        /* simlib event_id of active timeout timer (-1 if none) */
+
+  /* Receiver Sliding Window State */
+  long int R_next;                  /* Next expected in-order sequence number (RN) */
+  int * recv_buf;                   /* 1 if packet seq_num is buffered at receiver */
+
+  /* Statistics */
   long int blip_counter;
-  long int arrival_count;
-  long int packets_processed;
-  long int number_of_packets_processed;
-  long int number_of_collisions;
-  double accumulated_delay;
+  long int total_tx_attempts;       /* Total data packet transmissions attempted */
+  long int number_of_packets_processed; /* Total packets delivered & ACKed (S_base) */
   unsigned random_seed;
 } Simulation_Run_Data, * Simulation_Run_Data_Ptr;
 
 /**********************************************************************/
-
-/*
- * Function prototypes
- */
 
 int
 main(void);
@@ -88,9 +87,3 @@ main(void);
 /**********************************************************************/
 
 #endif /* main.h */
-
-
-
-
-
-
