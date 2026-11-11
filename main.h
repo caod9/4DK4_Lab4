@@ -1,54 +1,18 @@
-
-/*
- * 
- * Simulation_Run of the ALOHA Protocol
- * 
- * Copyright (C) 2014 Terence D. Todd
- * Hamilton, Ontario, CANADA
- * todd@mcmaster.ca
- * 
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 3 of the
- * License, or (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see
- * <http://www.gnu.org/licenses/>.
- * 
- */
-
-/**********************************************************************/
 #ifndef _MAIN_H_
 #define _MAIN_H_
-
-/**********************************************************************/
 
 #include "simlib.h"
 #include "simparameters.h"
 
-/**********************************************************************/
+typedef struct _packet_ {
+  long int seq;
+  long int ack_seq;
+  long int R_next;
+  double service_time;
+} Packet, *Packet_Ptr;
 
-typedef double Time;
-typedef Fifoqueue_Ptr Buffer_Ptr;
-
-/**********************************************************************/
-
-/* Passed as the event attachment for Packet, ACK, and Timeout events */
-typedef struct _packet_ 
-{
-  long int seq_num;       /* Packet sequence number (or ACKed seq_num) */
-  long int rn;            /* Cumulative ACK R_next carried by an ACK */
-} Packet, * Packet_Ptr;
-
-typedef struct _simulation_run_data_
-{
-  /* Protocol & Channel Parameters (allows sweeping in main.c later) */
+typedef struct _simulation_run_data_ {
+  /* Configuration Parameters */
   int Ws;
   int Wr;
   double pd;
@@ -56,34 +20,31 @@ typedef struct _simulation_run_data_
   double timeout_interval;
   int finite_source;
   long int max_packets;
-
-  /* Sender Sliding Window State */
-  long int S_base;                  /* Oldest unacknowledged sequence number */
-  long int next_seq;                /* Next new sequence number to transmit */
-  int tx_busy;                      /* 1 if sender is currently transmitting */
-  Buffer_Ptr retx_queue;            /* FIFO queue of sequence numbers to retransmit */
-
-  /* Per-packet tracking arrays (dynamically allocated in main.c) */
-  int * acked;                      /* 1 if packet seq_num has been ACKed */
-  int * in_retx_queue;              /* 1 if packet seq_num is waiting in retx_queue */
-  long int * timer_event_id;        /* simlib event_id of active timeout timer (-1 if none) */
-
-  /* Receiver Sliding Window State */
-  long int R_next;                  /* Next expected in-order sequence number (RN) */
-  int * recv_buf;                   /* 1 if packet seq_num is buffered at receiver */
-
-  /* Statistics */
-  long int blip_counter;
-  long int total_tx_attempts;       /* Total data packet transmissions attempted */
-  long int number_of_packets_processed; /* Total packets delivered & ACKed (S_base) */
   unsigned random_seed;
-} Simulation_Run_Data, * Simulation_Run_Data_Ptr;
 
-/**********************************************************************/
+  /* Sender & Receiver State */
+  long int S_base;
+  long int next_seq;
+  int tx_busy;
+  long int R_next;
+  long int blip_counter;
+  long int total_tx_attempts;
+  long int number_of_packets_processed;
+  Fifoqueue_Ptr retx_queue;
 
-int
-main(void);
+  /* Dynamic Tracking Arrays */
+  int *acked;
+  int *in_retx_queue;
+  long int *timer_event_id;
+  int *recv_buf;
 
-/**********************************************************************/
+  /* Diagnostic / Verification Counters */
+  long int pkt_drops;
+  long int ack_drops;
+  long int timeouts;
+  long int retx_count;
+  long int ooo_rejected;
+  long int ooo_buffered;
+} Simulation_Run_Data, *Simulation_Run_Data_Ptr;
 
-#endif /* main.h */
+#endif /* _MAIN_H_ */

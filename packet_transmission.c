@@ -1,370 +1,314 @@
-
-/*
- * Simulation_Run of the ALOHA Protocol
- * 
- * Copyright (C) 2014 Terence D. Todd Hamilton, Ontario, CANADA
- * todd@mcmaster.ca
- * 
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 3 of the License, or (at your option)
- * any later version.
- * 
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- * 
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
- * 
- */
-
-/*******************************************************************************/
-
-#include <stdio.h>
-#include <math.h>
-#include "trace.h"
-#include "output.h"
-#include "channel.h"
-#include "packet_transmission.h"
-
-/*******************************************************************************/
-
 #include <stdio.h>
 #include <stdlib.h>
-#include "trace.h"
-#include "output.h"
+#include <stdarg.h>
+#include "simlib.h"
+#include "simparameters.h"
 #include "packet_duration.h"
+#include "output.h"
+#include "trace.h"
+#include "main.h"
 #include "packet_transmission.h"
 
-/*******************************************************************************/
-/* Helper: Start transmitting a retransmission or new packet if transmitter idle */
-/*******************************************************************************/
+#ifndef PROPAGATION_DELAY
+#define PROPAGATION_DELAY 5.0
+#endif
 
+#ifndef ACK_DURATION
+#define ACK_DURATION 0.0
+#endif
+
+/* Set to 1 if you want step-by-step console event traces printed */
+#ifndef ENABLE_CONSOLE_TRACE
+#define ENABLE_CONSOLE_TRACE 0
+#endif
+
+static void
+trace_msg(Simulation_Run_Ptr sim_run, const char *fmt, ...)
+{
+#if ENABLE_CONSOLE_TRACE
+  va_list args;
+  printf("[t=%6.2f ms] ", simulation_run_get_time(sim_run));
+  va_start(args, fmt);
+  vprintf(fmt, args);
+  va_end(args);
+#else
+  (void) sim_run;
+  (void) fmt;
+#endif
+}
+
+/* =========================================================================
+ * Helper to schedule any event in simlib
+ * ========================================================================= */
+static long int
+schedule_sim_event(Simulation_Run_Ptr sim_run,
+                   const char *desc,
+                   void (*func)(Simulation_Run_Ptr, void *),
+                   void *arg,
+                   double event_time)
+{
+  Event event;
+  event.description = desc;
+  event.function = func;
+  event.attachment = arg;
+  return simulation_run_schedule_event(sim_run, event, event_time);
+}
+
+/* =========================================================================
+ * Attempt to transmit the next queued retransmission or new packet in window
+ * ========================================================================= */
 void
 try_send_next_packet(Simulation_Run_Ptr simulation_run)
 {
   Simulation_Run_Data_Ptr data;
-  Packet_Ptr tx_pkt, tmr_pkt, q_pkt;
-  long int seq_to_send = -1;
-  int is_retx = 0;
-  Time now;
+  long int seq;
+  double now, tx_duration;
+  Packet_Ptr pkt;
 
   data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
-  now = simulation_run_get_time(simulation_run);
 
-  if (data->tx_busy) {
+  if (data->tx_busy || data->number_of_packets_processed >= data->max_packets) {
     return;
   }
 
-  /* 1. Clean out any already-ACKed packets sitting at front of retx_queue */
-  while (fifoqueue_size(data->retx_queue) > 0) {
-    q_pkt = (Packet_Ptr) fifoqueue_see_front(data->retx_queue);
-    if (data->acked[q_pkt->seq_num] || q_pkt->seq_num < data->S_base) {
-      q_pkt = (Packet_Ptr) fifoqueue_get(data->retx_queue);
-      data->in_retx_queue[q_pkt->seq_num] = 0;
-      xfree(q_pkt);
-    } else {
-      break;
-    }
-  }
-
-  /* 2. Priority 1: Retransmit timed-out packet from retx_queue */
+  /* Priority 1: Retransmission queue */
   if (fifoqueue_size(data->retx_queue) > 0) {
-    q_pkt = (Packet_Ptr) fifoqueue_get(data->retx_queue);
-    seq_to_send = q_pkt->seq_num;
-    data->in_retx_queue[seq_to_send] = 0;
-    xfree(q_pkt);
-    is_retx = 1;
+    seq = (long int) fifoqueue_get(data->retx_queue);
+    data->in_retx_queue[seq] = 0;
+    data->retx_count++; /* Count actual retransmission */
   }
-  /* 3. Priority 2: Send new packet if within send window [S_base, S_base + Ws - 1] */
+  /* Priority 2: New packet within the Send Window [S_base, S_base + Ws - 1] */
   else if (data->next_seq < data->S_base + data->Ws) {
-    if (!data->finite_source || data->next_seq < data->max_packets) {
-      seq_to_send = data->next_seq;
-      data->next_seq++;
-      is_retx = 0;
+    if (data->finite_source && data->next_seq >= data->max_packets) {
+      return;
     }
+    seq = data->next_seq++;
+  } else {
+    return; /* Send window is full; wait for ACK */
   }
 
-  if (seq_to_send != -1) {
-    data->tx_busy = 1;
-    data->total_tx_attempts++;
+  now = simulation_run_get_time(simulation_run);
+  tx_duration = get_packet_duration();
 
-    TRACE(printf("  [t=%.1f ms] SENDER: Start %s Pkt %ld (Win=[%ld, %ld])\n",
-                 now, is_retx ? "RETX" : "TX", seq_to_send,
-                 data->S_base, data->S_base + data->Ws - 1););
+  data->tx_busy = 1;
+  data->total_tx_attempts++;
 
-    /* Schedule End of Packet Transmission (now + 1.0 ms) */
-    tx_pkt = (Packet_Ptr) xmalloc(sizeof(Packet));
-    tx_pkt->seq_num = seq_to_send;
-    tx_pkt->rn = 0;
-    schedule_transmission_end_event(simulation_run,
-                                    now + get_packet_duration(),
-                                    (void *) tx_pkt);
+  /* Allocate packet descriptor for transmission event */
+  pkt = (Packet_Ptr) xmalloc(sizeof(Packet));
+  pkt->seq = seq;
+  pkt->ack_seq = -1;
+  pkt->R_next = -1;
+  pkt->service_time = tx_duration;
 
-    /* Cancel any previous timer for this seq_num before setting a new one */
-    if (data->timer_event_id[seq_to_send] != -1) {
-      void *old_att = simulation_run_deschedule_event(simulation_run,
-                                                      data->timer_event_id[seq_to_send]);
-      if (old_att != NULL) xfree(old_att);
-      data->timer_event_id[seq_to_send] = -1;
-    }
+  /* Schedule end of packet transmission on link */
+  schedule_sim_event(simulation_run, "End Packet TX",
+                     end_packet_transmission_event, (void *) pkt,
+                     now + tx_duration);
 
-    /* Schedule Timeout Event (now + Tout) and save its event_id */
-    tmr_pkt = (Packet_Ptr) xmalloc(sizeof(Packet));
-    tmr_pkt->seq_num = seq_to_send;
-    tmr_pkt->rn = 0;
-    data->timer_event_id[seq_to_send] = schedule_timeout_event(
-        simulation_run, now + data->timeout_interval, (void *) tmr_pkt);
+  /* Cancel existing timer if active, then schedule fresh timeout */
+  if (data->timer_event_id[seq] != -1) {
+    simulation_run_deschedule_event(simulation_run, data->timer_event_id[seq]);
+    data->timer_event_id[seq] = -1;
   }
+
+  data->timer_event_id[seq] = schedule_sim_event(
+    simulation_run, "Packet Timeout",
+    timeout_event, (void *) seq,
+    now + data->timeout_interval
+  );
+
+  trace_msg(simulation_run, "[TX START] Pkt seq=%ld (S_base=%ld, next_seq=%ld)\n",
+            seq, data->S_base, data->next_seq);
 }
 
-/*******************************************************************************/
-/* Event 1: End of Packet Transmission at Source                               */
-/*******************************************************************************/
-
-long int
-schedule_transmission_end_event(Simulation_Run_Ptr simulation_run,
-                                Time event_time, void * packet)
-{
-  Event event;
-  event.description = "End of Packet Tx";
-  event.function = transmission_end_event;
-  event.attachment = packet;
-  return simulation_run_schedule_event(simulation_run, event, event_time);
-}
-
+/* =========================================================================
+ * Event: Packet finishes serializing onto the link
+ * ========================================================================= */
 void
-transmission_end_event(Simulation_Run_Ptr simulation_run, void * ptr)
+end_packet_transmission_event(Simulation_Run_Ptr simulation_run, void *ptr)
 {
   Simulation_Run_Data_Ptr data;
-  Packet_Ptr this_packet;
-  Time now;
+  Packet_Ptr pkt;
+  double now;
 
   data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
+  pkt = (Packet_Ptr) ptr;
   now = simulation_run_get_time(simulation_run);
-  this_packet = (Packet_Ptr) ptr;
 
-  /* Transmitter is now free */
   data->tx_busy = 0;
 
-  /* Check if data packet experiences channel error with probability pd */
+  /* Roll channel error probability pd */
   if (uniform_generator() >= data->pd) {
-    schedule_packet_arrival_at_dest_event(simulation_run,
-                                          now + PROP_DELAY,
-                                          (void *) this_packet);
+    schedule_sim_event(simulation_run, "Packet Arrival at RX",
+                       end_packet_reception_event, (void *) pkt,
+                       now + PROPAGATION_DELAY);
+    trace_msg(simulation_run, "[TX DONE] Pkt seq=%ld propagating to receiver\n", pkt->seq);
   } else {
-    TRACE(printf("  [t=%.1f ms] CHANNEL: Data Pkt %ld lost/corrupted (pd)\n",
-                 now, this_packet->seq_num););
-    xfree(this_packet);
+    data->pkt_drops++; /* Count dropped data packet */
+    trace_msg(simulation_run, "[DROP DATA] Pkt seq=%ld corrupted on channel\n", pkt->seq);
+    xfree(pkt);
   }
 
-  /* Immediately start next packet transmission if eligible */
+  /* Pipeline next packet immediately if window allows */
   try_send_next_packet(simulation_run);
 }
 
-/*******************************************************************************/
-/* Event 2: Data Packet Arrival at Destination                                 */
-/*******************************************************************************/
-
-long int
-schedule_packet_arrival_at_dest_event(Simulation_Run_Ptr simulation_run,
-                                      Time event_time, void * packet)
-{
-  Event event;
-  event.description = "Pkt Arrival at Dest";
-  event.function = packet_arrival_at_dest_event;
-  event.attachment = packet;
-  return simulation_run_schedule_event(simulation_run, event, event_time);
-}
-
+/* =========================================================================
+ * Event: Data packet arrives at the receiver
+ * ========================================================================= */
 void
-packet_arrival_at_dest_event(Simulation_Run_Ptr simulation_run, void * ptr)
+end_packet_reception_event(Simulation_Run_Ptr simulation_run, void *ptr)
 {
   Simulation_Run_Data_Ptr data;
-  Packet_Ptr rx_pkt, ack_pkt;
-  long int seq;
-  int accepted = 0;
-  Time now;
+  Packet_Ptr pkt, ack_pkt;
+  long int seq, ack_seq;
+  double now;
 
   data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
+  pkt = (Packet_Ptr) ptr;
+  seq = pkt->seq;
   now = simulation_run_get_time(simulation_run);
-  rx_pkt = (Packet_Ptr) ptr;
-  seq = rx_pkt->seq_num;
 
-  TRACE(printf("  [t=%.1f ms] RECEIVER: Pkt %ld arrived (R_next=%ld, Win=[%ld, %ld])\n",
-               now, seq, data->R_next, data->R_next, data->R_next + data->Wr - 1););
+  xfree(pkt);
 
-  /* Check if packet falls within receive window [R_next, R_next + Wr - 1] */
-  if (seq < data->R_next) {
-    /* Already delivered duplicate packet; re-ACK it */
-    accepted = 1;
-  } else if (seq >= data->R_next && seq < data->R_next + data->Wr) {
-    accepted = 1;
+  /* Check if packet falls within Receive Window [R_next, R_next + Wr - 1] */
+  if (seq >= data->R_next && seq < data->R_next + data->Wr) {
+    if (seq > data->R_next && data->recv_buf[seq] == 0) {
+      data->ooo_buffered++; /* Out-of-order frame buffered in Selective Repeat */
+      trace_msg(simulation_run, "[RX BUFFERED] Out-of-order Pkt seq=%ld buffered (R_next=%ld)\n",
+                seq, data->R_next);
+    }
+
     data->recv_buf[seq] = 1;
-    /* Slide receive window R_next forward for contiguous in-order packets */
-    while (data->recv_buf[data->R_next]) {
-      data->recv_buf[data->R_next] = 0;
+    ack_seq = seq;
+
+    /* Advance R_next across all contiguous buffered packets */
+    while (data->recv_buf[data->R_next] == 1) {
       data->R_next++;
     }
+    trace_msg(simulation_run, "[RX ACCEPT] Pkt seq=%ld accepted, new R_next=%ld\n",
+              seq, data->R_next);
+  } else {
+    if (seq >= data->R_next + data->Wr) {
+      data->ooo_rejected++; /* Out-of-order frame discarded (e.g., GBN Wr=1) */
+      trace_msg(simulation_run, "[RX REJECT] Out-of-order Pkt seq=%ld discarded (R_next=%ld, Wr=%d)\n",
+                seq, data->R_next, data->Wr);
+    } else {
+      trace_msg(simulation_run, "[RX DUPLICATE] Duplicate Pkt seq=%ld ignored (R_next=%ld)\n",
+                seq, data->R_next);
+    }
+    ack_seq = -1;
   }
 
-  /* Generate ACK for successfully received data packet (lost with prob pa) */
+  /* Send ACK (contains cumulative R_next, plus selective seq if accepted) */
   if (uniform_generator() >= data->pa) {
     ack_pkt = (Packet_Ptr) xmalloc(sizeof(Packet));
-    ack_pkt->seq_num = accepted ? seq : -1;
-    ack_pkt->rn = data->R_next;
-    schedule_ack_arrival_at_src_event(simulation_run,
-                                      now + PROP_DELAY,
-                                      (void *) ack_pkt);
+    ack_pkt->seq = -1;
+    ack_pkt->ack_seq = ack_seq;
+    ack_pkt->R_next = data->R_next;
+    ack_pkt->service_time = ACK_DURATION;
+
+    schedule_sim_event(simulation_run, "ACK Arrival at Sender",
+                       ack_arrival_event, (void *) ack_pkt,
+                       now + ACK_DURATION + PROPAGATION_DELAY);
   } else {
-    TRACE(printf("  [t=%.1f ms] CHANNEL: ACK for Pkt %ld (RN=%ld) lost (pa)\n",
-                 now, seq, data->R_next););
+    data->ack_drops++; /* Count dropped ACK */
+    trace_msg(simulation_run, "[DROP ACK] ACK (R_next=%ld, ack_seq=%ld) lost on channel\n",
+              data->R_next, ack_seq);
   }
-
-  xfree(rx_pkt);
 }
 
-/*******************************************************************************/
-/* Event 3: ACK Arrival at Source                                              */
-/*******************************************************************************/
-
-long int
-schedule_ack_arrival_at_src_event(Simulation_Run_Ptr simulation_run,
-                                  Time event_time, void * ack_ptr)
-{
-  Event event;
-  event.description = "ACK Arrival at Src";
-  event.function = ack_arrival_at_src_event;
-  event.attachment = ack_ptr;
-  return simulation_run_schedule_event(simulation_run, event, event_time);
-}
-
+/* =========================================================================
+ * Event: ACK arrives back at the sender
+ * ========================================================================= */
 void
-ack_arrival_at_src_event(Simulation_Run_Ptr simulation_run, void * ptr)
+ack_arrival_event(Simulation_Run_Ptr simulation_run, void *ptr)
 {
   Simulation_Run_Data_Ptr data;
   Packet_Ptr ack_pkt;
-  long int p, ack_seq, rn;
-  Time now;
+  long int sel_ack, cum_ack;
 
   data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
-  now = simulation_run_get_time(simulation_run);
   ack_pkt = (Packet_Ptr) ptr;
-  ack_seq = ack_pkt->seq_num;
-  rn = ack_pkt->rn;
-
-  TRACE(printf("  [t=%.1f ms] SENDER: ACK arrived (ack_seq=%ld, RN=%ld)\n",
-               now, ack_seq, rn););
-
-  /* 1. Cumulative ACK (RN) acknowledges all packets < RN */
-  if (rn > data->S_base) {
-    for (p = data->S_base; p < rn; p++) {
-      data->acked[p] = 1;
-      if (data->timer_event_id[p] != -1) {
-        void *old_att = simulation_run_deschedule_event(simulation_run,
-                                                        data->timer_event_id[p]);
-        if (old_att != NULL) xfree(old_att);
-        data->timer_event_id[p] = -1;
-      }
-    }
-    data->S_base = rn;
-    while (data->acked[data->S_base]) {
-      data->S_base++;
-    }
-  }
-
-  /* 2. For SR (Wr > 1), selective ACK acknowledges individual buffered packet */
-  if (data->Wr > 1 && ack_seq >= data->S_base) {
-    data->acked[ack_seq] = 1;
-    if (data->timer_event_id[ack_seq] != -1) {
-      void *old_att = simulation_run_deschedule_event(simulation_run,
-                                                      data->timer_event_id[ack_seq]);
-      if (old_att != NULL) xfree(old_att);
-      data->timer_event_id[ack_seq] = -1;
-    }
-    while (data->acked[data->S_base]) {
-      data->S_base++;
-    }
-  }
-
-  data->number_of_packets_processed = data->S_base;
-  output_blip_to_screen(simulation_run);
+  sel_ack = ack_pkt->ack_seq;
+  cum_ack = ack_pkt->R_next;
 
   xfree(ack_pkt);
 
-  if (data->number_of_packets_processed < data->max_packets) {
-    try_send_next_packet(simulation_run);
+  /* 1. Mark selective ACK if present */
+  if (sel_ack != -1 && !data->acked[sel_ack]) {
+    data->acked[sel_ack] = 1;
+    if (data->timer_event_id[sel_ack] != -1) {
+      simulation_run_deschedule_event(simulation_run, data->timer_event_id[sel_ack]);
+      data->timer_event_id[sel_ack] = -1;
+    }
   }
+
+  /* 2. Slide S_base up to cumulative R_next */
+  while (data->S_base < cum_ack) {
+    if (!data->acked[data->S_base]) {
+      data->acked[data->S_base] = 1;
+    }
+    if (data->timer_event_id[data->S_base] != -1) {
+      simulation_run_deschedule_event(simulation_run, data->timer_event_id[data->S_base]);
+      data->timer_event_id[data->S_base] = -1;
+    }
+    data->S_base++;
+    data->number_of_packets_processed++;
+    output_blip_to_screen(simulation_run);
+  }
+
+  trace_msg(simulation_run, "[ACK ARRIVE] cum_ack=%ld, sel_ack=%ld -> S_base=%ld\n",
+            cum_ack, sel_ack, data->S_base);
+
+  try_send_next_packet(simulation_run);
 }
 
-/*******************************************************************************/
-/* Event 4: Retransmission Timeout at Source                                   */
-/*******************************************************************************/
-
-long int
-schedule_timeout_event(Simulation_Run_Ptr simulation_run,
-                       Time event_time, void * pkt_ptr)
-{
-  Event event;
-  event.description = "Packet Timeout";
-  event.function = timeout_event;
-  event.attachment = pkt_ptr;
-  return simulation_run_schedule_event(simulation_run, event, event_time);
-}
-
+/* =========================================================================
+ * Event: Retransmission timer expires for packet seq
+ * ========================================================================= */
 void
-timeout_event(Simulation_Run_Ptr simulation_run, void * ptr)
+timeout_event(Simulation_Run_Ptr simulation_run, void *ptr)
 {
   Simulation_Run_Data_Ptr data;
-  Packet_Ptr tmr_pkt, q_pkt;
   long int seq, p;
-  Time now;
 
   data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
-  now = simulation_run_get_time(simulation_run);
-  tmr_pkt = (Packet_Ptr) ptr;
-  seq = tmr_pkt->seq_num;
+  seq = (long int) ptr;
 
-  /* Timer has now fired, so clear its ID */
   data->timer_event_id[seq] = -1;
 
-  if (!data->acked[seq]) {
-    TRACE(printf("  [t=%.1f ms] SENDER: TIMEOUT for Pkt %ld!\n", now, seq););
-
-    if (data->Wr == 1) {
-      /* GBN / S&W: Queue all unACKed packets from S_base to next_seq - 1 */
-      for (p = data->S_base; p < data->next_seq; p++) {
-        if (!data->acked[p] && !data->in_retx_queue[p]) {
-          q_pkt = (Packet_Ptr) xmalloc(sizeof(Packet));
-          q_pkt->seq_num = p;
-          q_pkt->rn = 0;
-          fifoqueue_put(data->retx_queue, (void *) q_pkt);
-          data->in_retx_queue[p] = 1;
-
-          /* Deschedule pending timers for subsequent packets in window */
-          if (data->timer_event_id[p] != -1) {
-            void *old_att = simulation_run_deschedule_event(simulation_run,
-                                                            data->timer_event_id[p]);
-            if (old_att != NULL) xfree(old_att);
-            data->timer_event_id[p] = -1;
-          }
-        }
-      }
-    } else {
-      /* Selective Repeat: Retransmit only the timed-out packet */
-      if (!data->in_retx_queue[seq]) {
-        q_pkt = (Packet_Ptr) xmalloc(sizeof(Packet));
-        q_pkt->seq_num = seq;
-        q_pkt->rn = 0;
-        fifoqueue_put(data->retx_queue, (void *) q_pkt);
-        data->in_retx_queue[seq] = 1;
-      }
-    }
-
-    try_send_next_packet(simulation_run);
+  if (data->acked[seq]) {
+    return; /* Packet already acknowledged */
   }
 
-  xfree(tmr_pkt);
+  data->timeouts++; /* Count valid timeout */
+
+  if (data->Wr == 1) {
+    /* Stop-and-Wait & Go-Back-N: Roll back and re-queue all unACKed packets */
+    trace_msg(simulation_run, "[TIMEOUT GBN/SW] Pkt seq=%ld timed out; rolling back window [%ld..%ld]\n",
+              seq, data->S_base, data->next_seq - 1);
+
+    for (p = data->S_base; p < data->next_seq; p++) {
+      if (!data->acked[p] && !data->in_retx_queue[p]) {
+        fifoqueue_put(data->retx_queue, (void *) p);
+        data->in_retx_queue[p] = 1;
+      }
+      if (p != seq && data->timer_event_id[p] != -1) {
+        simulation_run_deschedule_event(simulation_run, data->timer_event_id[p]);
+        data->timer_event_id[p] = -1;
+      }
+    }
+  } else {
+    /* Selective Repeat (Wr > 1): Surgically re-queue ONLY the timed-out packet */
+    trace_msg(simulation_run, "[TIMEOUT SR] Pkt seq=%ld timed out; queuing selective retransmission\n",
+              seq);
+
+    if (!data->acked[seq] && !data->in_retx_queue[seq]) {
+      fifoqueue_put(data->retx_queue, (void *) seq);
+      data->in_retx_queue[seq] = 1;
+    }
+  }
+
+  try_send_next_packet(simulation_run);
 }
