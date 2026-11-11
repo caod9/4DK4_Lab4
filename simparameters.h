@@ -41,12 +41,12 @@
 #define RECV_WINDOW_SIZE     1      /* Wr */
 
 /* Channel Error Probabilities */
-#define PACKET_ERROR_PROB    0.5    /* pd (set to 0.0 or 0.5 for Exp 1) */
-#define ACK_ERROR_PROB       0.5    /* pa (set to 0.0 or 0.5 for Exp 1) */
+#define PACKET_ERROR_PROB    0    /* pd (set to 0.0 or 0.5 for Exp 1) */
+#define ACK_ERROR_PROB       0    /* pa (set to 0.0 or 0.5 for Exp 1) */
 
 /* Simulation Run Settings */
 #define FINITE_SOURCE        0      /* 0 = continuously backlogged, 1 = finite N packets */
-#define RUNLENGTH            5      /* 5 packets for Exp 1 trace (use 10000 for plots) */
+#define RUNLENGTH            10000      /* 5 packets for Exp 1 trace (use 10000 for plots) */
 #define BLIPRATE             1000
 
 /* Comma separated list of random seeds to run (put your Student ID first!) */
