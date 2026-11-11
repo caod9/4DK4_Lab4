@@ -96,21 +96,21 @@ main(void)
       /* Print out console results */
       output_results(simulation_run);
 
-      /* Compute performance metrics */
+/* Compute performance metrics */
       sim_time = simulation_run_get_time(simulation_run);
       efficiency = (data.number_of_packets_processed * MEAN_PACKET_DURATION) / sim_time;
       avg_tx_attempts = (double) data.total_tx_attempts / data.number_of_packets_processed;
 
-      /* Log row to CSV including diagnostic verification counters */
+      /* Log row to CSV including Total_Time_ms */
       log_row_to_csv(
         "simulation_results.csv",
-        "Protocol,Ws,Wr,Random_Seed,Runlength,pd,pa,Pkt_Drops,ACK_Drops,Timeouts,Retx_Count,OOO_Rejected,OOO_Buffered,Link_Efficiency,Avg_TX_Attempts",
-        "%s,%d,%d,%u,%ld,%.2f,%.2f,%ld,%ld,%ld,%ld,%ld,%ld,%.5f,%.5f",
+        "Protocol,Ws,Wr,Random_Seed,Runlength,pd,pa,Pkt_Drops,ACK_Drops,Timeouts,Retx_Count,OOO_Rejected,OOO_Buffered,Total_Time_ms,Link_Efficiency,Avg_TX_Attempts",
+        "%s,%d,%d,%u,%ld,%.2f,%.2f,%ld,%ld,%ld,%ld,%ld,%ld,%.2f,%.5f,%.5f",
         protocols[p].protocol_name, data.Ws, data.Wr,
         data.random_seed, data.max_packets, data.pd, data.pa,
         data.pkt_drops, data.ack_drops, data.timeouts, data.retx_count,
         data.ooo_rejected, data.ooo_buffered,
-        efficiency, avg_tx_attempts
+        sim_time, efficiency, avg_tx_attempts
       );
 
       /* Clean up memory for this seed run */
