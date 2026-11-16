@@ -41,8 +41,8 @@
 #define RECV_WINDOW_SIZE     1      /* Wr */
 
 /* Channel Error Probabilities */
-#define PACKET_ERROR_PROB    0.0    /* pd (set to 0.0 or 0.5 for Exp 1) */
-#define ACK_ERROR_PROB       0.0    /* pa (set to 0.0 or 0.5 for Exp 1) */
+#define PACKET_ERROR_PROB    0.5    /* pd (set to 0.0 or 0.5 for Exp 1) */
+#define ACK_ERROR_PROB       0.5    /* pa (set to 0.0 or 0.5 for Exp 1) */
 
 /* Simulation Run Settings */
 #define FINITE_SOURCE        0      /* 0 = continuously backlogged, 1 = finite N packets */
